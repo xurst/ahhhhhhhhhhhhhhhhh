@@ -1,3 +1,0 @@
-pythoncom
-win32com
-winpython
