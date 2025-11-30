@@ -16,31 +16,19 @@
    cd <path-to-project-root>
    ```
 
-5. **Create a virtual environment**
-
-   ```bash
-   python -m venv venv
-   ```
-
-6. **Activate the virtual environment**
-
-   ```bash
-   .\venv\Scripts\activate
-   ```
-
-7. **Install the required packages**
+5. **Install the required packages**
 
    ```bash
    pip install -r requirements.txt
    ```
 
-8. **Navigate to the source directory**
+6. **Navigate to the source directory**
 
    ```bash
    cd src
    ```
 
-9. **Run the application**
+7. **Run the application**
 
    ```bash
    python main.py

@@ -1,0 +1,23 @@
+
+PsInfo v1.79 - Local and remote system information viewer
+Copyright (C) 2001-2023 Mark Russinovich
+Sysinternals - www.sysinternals.com
+
+Querying information for WINDOWS...
+
+System information for \\WINDOWS:
+Uptime:                    0 days 0 hours 2 minutes 23 seconds
+Kernel version:            Windows 10 Home, Multiprocessor Free
+Product type:              Professional
+Product version:           6.3
+Service pack:              0
+Kernel build number:       26200
+Registered organization:   
+Registered owner:          
+IE version:                9.0000
+System root:               C:\WINDOWS
+Processors:                8
+Processor speed:           3.4 GHz
+Processor type:            13th Gen Intel(R) Core(TM) i5-13600KF
+Physical memory:           4076 MB
+Video driver:              VirtualBox Graphics Adapter (WDDM)
